@@ -1,4 +1,5 @@
 import http from "node:http";
+import { AppsScriptDriveClient } from "./appsScriptDrive.js";
 import { getConfig } from "./config.js";
 import { GoogleDriveClient } from "./googleDrive.js";
 import { GoogleSheetsClient } from "./googleSheets.js";
@@ -29,7 +30,9 @@ async function main() {
         spreadsheetId: config.sheets.adminSpreadsheetId,
       })
     : null;
-  const drive = config.google.driveFolderId
+  const drive = config.driveUpload.webAppUrl
+    ? new AppsScriptDriveClient(config.driveUpload)
+    : config.google.driveFolderId
     ? new GoogleDriveClient({
         serviceAccountEmail: config.google.serviceAccountEmail,
         privateKey: config.google.privateKey,

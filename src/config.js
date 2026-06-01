@@ -95,6 +95,10 @@ export function getConfig() {
       privateKey: serviceAccount?.privateKey || getPrivateKey(),
       driveFolderId: process.env.GOOGLE_DRIVE_FOLDER_ID || "",
     },
+    driveUpload: {
+      webAppUrl: process.env.DRIVE_UPLOAD_WEB_APP_URL || "",
+      secret: process.env.DRIVE_UPLOAD_SECRET || "",
+    },
     sheets: {
       leaveRecordSheetName: process.env.LEAVE_RECORD_SHEET_NAME || "請假申請紀錄",
       employeeSheetName: process.env.EMPLOYEE_SHEET_NAME || "請假",
