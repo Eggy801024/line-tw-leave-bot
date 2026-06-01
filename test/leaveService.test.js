@@ -3,8 +3,11 @@ import test from "node:test";
 import { LeaveService } from "../src/leaveService.js";
 
 class FakeSheets {
-  constructor() {
+  constructor({ twoRowEmployeeHeader = false } = {}) {
     this.rows = [];
+    this.twoRowEmployeeHeader = twoRowEmployeeHeader;
+    this.updatedValues = [];
+    this.formattedRanges = [];
   }
 
   async ensureSheet() {}
@@ -33,6 +36,16 @@ class FakeSheets {
       ];
     }
 
+    if (this.twoRowEmployeeHeader) {
+      return [
+        ["", "", "", "B班", "B班", "A班"],
+        ["", "工號", "姓名", "6/1", "6/2", "6/3", "6/16"],
+        ["組長", "P0949", "陳世宏", "例", "", "N1", "N1"],
+        ["", "P0216", "潘鳳翎", "例", "", "N1", "休"],
+        ["", "P0218", "鍾家豪", "例", "", "N1", "N1"],
+      ];
+    }
+
     return [
       ["工號", "姓名", "部門/班別"],
       ["P0216", "王小明", "A班"],
@@ -41,6 +54,14 @@ class FakeSheets {
 
   async appendValues(_range, rows) {
     this.rows.push(...rows);
+  }
+
+  async updateValues(range, values) {
+    this.updatedValues.push({ range, values });
+  }
+
+  async formatCells(sheetName, ranges, userEnteredFormat) {
+    this.formattedRanges.push({ sheetName, ranges, userEnteredFormat });
   }
 }
 
@@ -51,7 +72,7 @@ class FakeDrive {
 }
 
 function makeService(extra = {}) {
-  const sheets = new FakeSheets();
+  const sheets = new FakeSheets(extra.sheetsOptions);
   const service = new LeaveService({
     sheetsClient: sheets,
     adminSheetsClient: null,
@@ -65,7 +86,8 @@ function makeService(extra = {}) {
       },
       rules: {
         workerIdPattern: /[A-Z]{1,3}\d{3,4}/i,
-        defaultFullDayHours: 12,
+        defaultFullDayHours: 10,
+        breakHoursForFullShift: 2,
         pendingSickLeaveMinutes: 30,
         adminLineUserIds: [],
         excludedLeaveTypes: ["特休", "喪假", "婚假"],
@@ -86,7 +108,7 @@ test("records non-sick leave immediately", async () => {
   assert.equal(sheets.rows.length, 1);
   assert.equal(sheets.rows[0][2], "P0216");
   assert.equal(sheets.rows[0][5], "事假");
-  assert.equal(sheets.rows[0][10], 12);
+  assert.equal(sheets.rows[0][10], 10);
 });
 
 test("waits for image proof before recording sick leave", async () => {
@@ -133,4 +155,90 @@ test("returns LINE user id", async () => {
   });
 
   assert.match(reply, /Umanager/);
+});
+
+test("finds employees when 工號 header is on the second row", async () => {
+  const { service, sheets } = makeService({ sheetsOptions: { twoRowEmployeeHeader: true } });
+  const reply = await service.handleTextMessage({
+    text: "P0949 6/16 事假",
+    source: { userId: "U1" },
+  });
+
+  assert.match(reply, /請假申請已紀錄/);
+  assert.equal(sheets.rows.length, 1);
+  assert.equal(sheets.rows[0][2], "P0949");
+  assert.equal(sheets.rows[0][3], "陳世宏");
+  assert.equal(sheets.rows[0][4], "組長");
+});
+
+test("marks leave type on N1 date cell with formatting", async () => {
+  const { service, sheets } = makeService({ sheetsOptions: { twoRowEmployeeHeader: true } });
+  const reply = await service.handleTextMessage({
+    text: "P0949 6/16 事假",
+    source: { userId: "U1" },
+  });
+
+  assert.match(reply, /已同步排班表：2026-06-16/);
+  assert.equal(sheets.updatedValues.length, 1);
+  assert.equal(sheets.updatedValues[0].range, "'請假'!G3");
+  assert.deepEqual(sheets.updatedValues[0].values, [["事假"]]);
+  assert.equal(sheets.formattedRanges.length, 1);
+  assert.equal(sheets.formattedRanges[0].ranges[0].startRowIndex, 2);
+  assert.equal(sheets.formattedRanges[0].ranges[0].startColumnIndex, 6);
+});
+
+test("does not overwrite date cell when original value is not N1", async () => {
+  const { service, sheets } = makeService({ sheetsOptions: { twoRowEmployeeHeader: true } });
+  const reply = await service.handleTextMessage({
+    text: "P0216 6/16 事假",
+    source: { userId: "U1" },
+  });
+
+  assert.match(reply, /未更新日期：2026-06-16/);
+  assert.equal(sheets.updatedValues.length, 0);
+  assert.equal(sheets.formattedRanges.length, 0);
+});
+
+test("records multiple employees from one LINE sender", async () => {
+  const { service, sheets } = makeService({ sheetsOptions: { twoRowEmployeeHeader: true } });
+  const reply = await service.handleTextMessage({
+    text: "P0216/P0218 6/16 事假",
+    source: { userId: "Ucouple" },
+  });
+
+  assert.match(reply, /請假申請已紀錄/);
+  assert.equal(sheets.rows.length, 2);
+  assert.equal(sheets.rows[0][1], "Ucouple");
+  assert.equal(sheets.rows[1][1], "Ucouple");
+  assert.equal(sheets.rows[0][2], "P0216");
+  assert.equal(sheets.rows[1][2], "P0218");
+  assert.equal(sheets.updatedValues.length, 1);
+  assert.equal(sheets.updatedValues[0].range, "'請假'!G5");
+});
+
+test("parses explicit leave hours without time range", () => {
+  const { service } = makeService();
+  const request = service.parseRequest("P0216 6/16 事假 4小時 家中有事", new Date(2026, 4, 31));
+
+  assert.equal(request.type, "leave");
+  assert.equal(request.hours, 4);
+  assert.equal(request.startTime, "未指定");
+  assert.equal(request.endTime, "未指定");
+});
+
+test("parses half-hour leave", () => {
+  const { service } = makeService();
+  const request = service.parseRequest("P0216 6/16 事假 0.5小時 睡過頭", new Date(2026, 4, 31));
+
+  assert.equal(request.type, "leave");
+  assert.equal(request.hours, 0.5);
+});
+
+test("deducts 2 break hours from full day shift ranges", () => {
+  const { service } = makeService();
+  const dayShift = service.parseRequest("P0216 6/16 事假 07:30-19:30", new Date(2026, 4, 31));
+  const nightShift = service.parseRequest("P0216 6/16 事假 19:30-07:30", new Date(2026, 4, 31));
+
+  assert.equal(dayShift.hours, 10);
+  assert.equal(nightShift.hours, 10);
 });
