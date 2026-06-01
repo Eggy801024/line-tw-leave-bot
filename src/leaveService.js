@@ -172,6 +172,17 @@ function findHeaderRow(rows, requiredHeader) {
   return rows.findIndex((row) => row.some((cell) => String(cell || "").trim() === requiredHeader));
 }
 
+function findDateColumns(rows) {
+  const dateColumns = new Map();
+  rows.forEach((row) => {
+    row.forEach((cell, index) => {
+      const label = String(cell || "").trim();
+      if (/^\d{1,2}\/\d{1,2}$/.test(label)) dateColumns.set(label, index);
+    });
+  });
+  return dateColumns;
+}
+
 export class LeaveService {
   constructor({ sheetsClient, adminSheetsClient, driveClient, config }) {
     this.sheets = sheetsClient;
@@ -232,7 +243,19 @@ export class LeaveService {
   }
 
   async findEmployee(workerId) {
-    const rows = await this.sheets.getValues(`${quoteSheetName(this.config.sheets.employeeSheetName)}!A1:Z500`);
+    const sheetNames = this.config.sheets.employeeSheetNames?.length
+      ? this.config.sheets.employeeSheetNames
+      : [this.config.sheets.employeeSheetName];
+
+    for (const sheetName of sheetNames) {
+      const employee = await this.findEmployeeInSheet(workerId, sheetName);
+      if (employee) return employee;
+    }
+    return null;
+  }
+
+  async findEmployeeInSheet(workerId, sheetName) {
+    const rows = await this.sheets.getValues(`${quoteSheetName(sheetName)}!A1:Z500`);
     if (rows.length === 0) return null;
 
     const headerRowIndex = findHeaderRow(rows, "工號");
@@ -249,7 +272,9 @@ export class LeaveService {
         return {
           workerId,
           name: row[nameCol] || "",
-          team: teamCol === undefined ? row[roleCol] || "" : row[teamCol] || "",
+          team: sheetName,
+          shift: teamCol === undefined ? row[roleCol] || "" : row[teamCol] || "",
+          sheetName,
         };
       }
     }
@@ -257,21 +282,29 @@ export class LeaveService {
   }
 
   async debugFindEmployee(workerId) {
-    const rows = await this.sheets.getValues(`${quoteSheetName(this.config.sheets.employeeSheetName)}!A1:Z20`);
-    const headerRowIndex = findHeaderRow(rows, "工號");
+    const sheetNames = this.config.sheets.employeeSheetNames?.length
+      ? this.config.sheets.employeeSheetNames
+      : [this.config.sheets.employeeSheetName];
     const employee = await this.findEmployee(workerId);
+    const checks = [];
+
+    for (const sheetName of sheetNames) {
+      const rows = await this.sheets.getValues(`${quoteSheetName(sheetName)}!A1:Z20`);
+      const headerRowIndex = findHeaderRow(rows, "工號");
+      checks.push(`${sheetName}：列數 ${rows.length}，工號標題列 ${headerRowIndex === -1 ? "找不到" : headerRowIndex + 1}`);
+    }
 
     return [
-      `人員分頁：${this.config.sheets.employeeSheetName}`,
-      `讀取列數：${rows.length}`,
-      `工號標題列：${headerRowIndex === -1 ? "找不到" : headerRowIndex + 1}`,
+      `人員分頁：${sheetNames.join("、")}`,
+      ...checks,
       `查詢工號：${workerId}`,
       employee ? `結果：${employee.workerId} ${employee.name || ""} ${employee.team || ""}` : "結果：找不到",
     ].join("\n");
   }
 
-  async markLeaveOnEmployeeSheet(request) {
-    const rows = await this.sheets.getValues(`${quoteSheetName(this.config.sheets.employeeSheetName)}!A1:AZ500`);
+  async markLeaveOnEmployeeSheet(request, employee = null) {
+    const sheetName = employee?.sheetName || this.config.sheets.employeeSheetName;
+    const rows = await this.sheets.getValues(`${quoteSheetName(sheetName)}!A1:AZ500`);
     if (rows.length === 0) {
       return { updated: [], skipped: datesBetween(request.startDate, request.endDate) };
     }
@@ -290,11 +323,7 @@ export class LeaveService {
       return { updated: [], skipped: datesBetween(request.startDate, request.endDate) };
     }
 
-    const dateColumns = new Map();
-    rows[headerRowIndex].forEach((cell, index) => {
-      const label = String(cell || "").trim();
-      if (label) dateColumns.set(label, index);
-    });
+    const dateColumns = findDateColumns(rows);
 
     const updated = [];
     const skipped = [];
@@ -309,7 +338,8 @@ export class LeaveService {
       }
 
       const currentValue = String(rows[employeeRowIndex]?.[colIndex] || "").trim();
-      if (currentValue.toUpperCase() !== "N1" && currentValue !== request.leaveType) {
+      const eligibleShiftMarks = this.config.rules.eligibleShiftMarks || ["N1", "D1", "AN3", "AD3"];
+      if (!eligibleShiftMarks.includes(currentValue.toUpperCase()) && currentValue !== request.leaveType) {
         skipped.push(dateText);
         continue;
       }
@@ -317,7 +347,7 @@ export class LeaveService {
       const colLetter = columnToLetter(colIndex);
       if (currentValue !== request.leaveType) {
         await this.sheets.updateValues(
-          `${quoteSheetName(this.config.sheets.employeeSheetName)}!${colLetter}${employeeRowIndex + 1}`,
+          `${quoteSheetName(sheetName)}!${colLetter}${employeeRowIndex + 1}`,
           [[request.leaveType]],
         );
       }
@@ -331,7 +361,7 @@ export class LeaveService {
     }
 
     if (formatRanges.length > 0 && typeof this.sheets.formatCells === "function") {
-      await this.sheets.formatCells(this.config.sheets.employeeSheetName, formatRanges, {
+      await this.sheets.formatCells(sheetName, formatRanges, {
         backgroundColor: { red: 1, green: 0.92, blue: 0.2 },
         textFormat: {
           foregroundColor: { red: 0.85, green: 0, blue: 0 },
@@ -436,7 +466,7 @@ export class LeaveService {
       markResults.push({
         workerId: employee.workerId,
         name: employee.name,
-        result: await this.markLeaveOnEmployeeSheet(employeeRequest),
+        result: await this.markLeaveOnEmployeeSheet(employeeRequest, employee),
       });
     }
 
@@ -476,7 +506,7 @@ export class LeaveService {
       markResults.push({
         workerId: employee.workerId,
         name: employee.name,
-        result: await this.markLeaveOnEmployeeSheet(employeeRequest),
+        result: await this.markLeaveOnEmployeeSheet(employeeRequest, employee),
       });
     }
     this.pendingSickLeaves.delete(source.userId);
@@ -506,7 +536,7 @@ export class LeaveService {
       lines.push(`已同步排班表：${markResult.updated.join("、")}`);
     }
     if (markResult.skipped.length > 0) {
-      lines.push(`未更新日期：${markResult.skipped.join("、")}（找不到日期或原格不是 N1）`);
+      lines.push(`未更新日期：${markResult.skipped.join("、")}（找不到日期或原格不是 D1/N1/AN3/AD3）`);
     }
     return lines.join("\n");
   }

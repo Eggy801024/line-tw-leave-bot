@@ -98,14 +98,16 @@ export function getConfig() {
     sheets: {
       leaveRecordSheetName: process.env.LEAVE_RECORD_SHEET_NAME || "請假申請紀錄",
       employeeSheetName: process.env.EMPLOYEE_SHEET_NAME || "請假",
+      employeeSheetNames: parseCsv(process.env.EMPLOYEE_SHEET_NAMES || "婷芬班,俊志班,美香班,翊展班"),
       adminSpreadsheetId: process.env.ADMIN_SPREADSHEET_ID || "",
       adminSheetName: process.env.ADMIN_SHEET_NAME || "主管權限",
     },
     rules: {
-      workerIdPattern: new RegExp(process.env.WORKER_ID_PATTERN || "[A-Z]{1,3}\\d{3,4}", "i"),
+      workerIdPattern: new RegExp(process.env.WORKER_ID_PATTERN || "(?:[A-Z]{1,3}\\d{3,4}|\\d{5})", "i"),
       defaultFullDayHours: Number(process.env.DEFAULT_FULL_DAY_HOURS || 10),
       breakHoursForFullShift: Number(process.env.BREAK_HOURS_FOR_FULL_SHIFT || 2),
       pendingSickLeaveMinutes: Number(process.env.PENDING_SICK_LEAVE_MINUTES || 30),
+      eligibleShiftMarks: parseCsv(process.env.ELIGIBLE_SHIFT_MARKS || "N1,D1,AN3,AD3"),
       adminLineUserIds: parseCsv(process.env.ADMIN_LINE_USER_IDS),
       excludedLeaveTypes: ["特休", "喪假", "婚假"],
     },
