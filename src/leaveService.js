@@ -172,6 +172,10 @@ function cleanReason(text, parts) {
   return reason.replace(/\s+/g, " ").trim() || "未填寫";
 }
 
+function forceText(value) {
+  return `'${value}`;
+}
+
 function indexHeaders(headers) {
   const output = {};
   headers.forEach((header, index) => {
@@ -245,7 +249,8 @@ export class LeaveService {
       return { type: "invalid", reason: `${leaveType} 不在此請假系統申請，請使用原本流程。` };
     }
 
-    const timeRange = parseTimeRange(text, {
+    const textWithoutDate = text.replace(dateRange.raw, " ");
+    const timeRange = parseTimeRange(textWithoutDate, {
       defaultFullDayHours: this.config.rules.defaultFullDayHours,
       breakHoursForFullShift: this.config.rules.breakHoursForFullShift || 0,
     });
@@ -441,10 +446,10 @@ export class LeaveService {
       employee?.name || "",
       employee?.team || "",
       request.leaveType,
-      request.startDate,
-      request.endDate,
-      request.startTime,
-      request.endTime,
+      forceText(request.startDate),
+      forceText(request.endDate),
+      forceText(request.startTime),
+      forceText(request.endTime),
       request.hours,
       request.reason,
       proofLink,
