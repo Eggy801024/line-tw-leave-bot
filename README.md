@@ -51,7 +51,14 @@ LINE使用者ID
 P0216 事假 6/3 08:00-20:00 家中有事
 P0216 病假 6/3 全天 發燒
 P0216 公假 6/3-6/4 全天 支援訓練
+P0216 事假 6/3 4小時 家中有事
+P0216 事假 6/3 0.5小時 睡過頭
+P0216 事假 6/3 07:30-19:30 家中有事
+P0216 事假 6/3 19:30-07:30 家中有事
+P0216/P0218 事假 6/16 家中有事
 ```
+
+沒有填時間或小時會以整天計算，預設 `DEFAULT_FULL_DAY_HOURS=10`。早班 `07:30-19:30` 與夜班 `19:30-07:30` 會扣 2 小時休息，記錄為 10 小時。也支援 `0.5小時` 這類小時數。若同一個 LINE 帳號替多位同仁請假，請用 `/` 分隔工號，系統會各自寫入一筆紀錄，`LINE使用者ID` 會記錄實際發訊息的人。
 
 病假流程：
 
@@ -115,7 +122,8 @@ TIME_ZONE=Asia/Taipei
 LEAVE_RECORD_SHEET_NAME=請假申請紀錄
 EMPLOYEE_SHEET_NAME=請假
 WORKER_ID_PATTERN=[A-Z]{1,3}\d{3,4}
-DEFAULT_FULL_DAY_HOURS=12
+DEFAULT_FULL_DAY_HOURS=10
+BREAK_HOURS_FOR_FULL_SHIFT=2
 PENDING_SICK_LEAVE_MINUTES=30
 ```
 
