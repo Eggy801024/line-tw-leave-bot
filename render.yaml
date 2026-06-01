@@ -1,0 +1,42 @@
+services:
+  - type: web
+    name: line-leave-request-bot
+    runtime: node
+    plan: free
+    buildCommand: ""
+    startCommand: "node src/server.js"
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: LINE_CHANNEL_SECRET
+        sync: false
+      - key: LINE_CHANNEL_ACCESS_TOKEN
+        sync: false
+      - key: GOOGLE_SPREADSHEET_ID
+        sync: false
+      - key: GOOGLE_SERVICE_ACCOUNT_EMAIL
+        sync: false
+      - key: GOOGLE_PRIVATE_KEY
+        sync: false
+      - key: GOOGLE_DRIVE_FOLDER_ID
+        sync: false
+      - key: ADMIN_SPREADSHEET_ID
+        sync: false
+      - key: ADMIN_SHEET_NAME
+        value: 主管權限
+      - key: ADMIN_LINE_USER_IDS
+        sync: false
+      - key: TIME_ZONE
+        value: Asia/Taipei
+      - key: LEAVE_RECORD_SHEET_NAME
+        value: 請假申請紀錄
+      - key: EMPLOYEE_SHEET_NAME
+        value: 請假
+      - key: WORKER_ID_PATTERN
+        value: "[A-Z]{1,3}\\d{3,4}"
+      - key: DEFAULT_FULL_DAY_HOURS
+        value: 12
+      - key: PENDING_SICK_LEAVE_MINUTES
+        value: 30
