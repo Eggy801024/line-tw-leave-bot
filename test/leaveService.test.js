@@ -171,6 +171,18 @@ test("finds employees when 工號 header is on the second row", async () => {
   assert.equal(sheets.rows[0][4], "組長");
 });
 
+test("debug command reports employee lookup details", async () => {
+  const { service } = makeService({ sheetsOptions: { twoRowEmployeeHeader: true } });
+  const reply = await service.handleTextMessage({
+    text: "檢查工號 P0949",
+    source: { userId: "U1" },
+  });
+
+  assert.match(reply, /人員分頁：請假/);
+  assert.match(reply, /工號標題列：2/);
+  assert.match(reply, /結果：P0949 陳世宏 組長/);
+});
+
 test("marks leave type on N1 date cell with formatting", async () => {
   const { service, sheets } = makeService({ sheetsOptions: { twoRowEmployeeHeader: true } });
   const reply = await service.handleTextMessage({
