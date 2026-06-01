@@ -36,6 +36,23 @@ class FakeSheets {
       ];
     }
 
+    if (range.includes("'婷芬班'")) {
+      return [
+        ["", "工號", "姓名", "班別", "班別\n代號", "A班", "A班"],
+        ["", "", "", "", "", "6/16", "6/17"],
+        ["主任", "P0068", "胡婷芬", "日A班", "A1", "D1"],
+        ["", "V0001", "外籍同仁", "外籍A班", "AN3", "AN3", "AD3"],
+      ];
+    }
+
+    if (range.includes("'俊志班'")) {
+      return [
+        ["", "工號", "姓名", "班別", "班別\n代號", "A班"],
+        ["", "", "", "", "", "6/16"],
+        ["組長", "P0949", "陳世宏", "夜A班", "A1", "N1"],
+      ];
+    }
+
     if (this.twoRowEmployeeHeader) {
       return [
         ["", "", "", "B班", "B班", "A班"],
@@ -82,12 +99,14 @@ function makeService(extra = {}) {
       sheets: {
         leaveRecordSheetName: "請假申請紀錄",
         employeeSheetName: "請假",
+        employeeSheetNames: extra.employeeSheetNames || [],
         adminSheetName: "主管權限",
       },
       rules: {
-        workerIdPattern: /[A-Z]{1,3}\d{3,4}/i,
+        workerIdPattern: /(?:[A-Z]{1,3}\d{3,4}|\d{5})/i,
         defaultFullDayHours: 10,
         breakHoursForFullShift: 2,
+        eligibleShiftMarks: ["N1", "D1", "AN3", "AD3"],
         pendingSickLeaveMinutes: 30,
         adminLineUserIds: [],
         excludedLeaveTypes: ["特休", "喪假", "婚假"],
@@ -168,7 +187,7 @@ test("finds employees when 工號 header is on the second row", async () => {
   assert.equal(sheets.rows.length, 1);
   assert.equal(sheets.rows[0][2], "P0949");
   assert.equal(sheets.rows[0][3], "陳世宏");
-  assert.equal(sheets.rows[0][4], "組長");
+  assert.equal(sheets.rows[0][4], "請假");
 });
 
 test("debug command reports employee lookup details", async () => {
@@ -179,8 +198,56 @@ test("debug command reports employee lookup details", async () => {
   });
 
   assert.match(reply, /人員分頁：請假/);
-  assert.match(reply, /工號標題列：2/);
-  assert.match(reply, /結果：P0949 陳世宏 組長/);
+  assert.match(reply, /請假：列數 5，工號標題列 2/);
+  assert.match(reply, /結果：P0949 陳世宏 請假/);
+});
+
+test("finds employees across class sheets and records class name", async () => {
+  const { service, sheets } = makeService({ employeeSheetNames: ["婷芬班", "俊志班"] });
+  const reply = await service.handleTextMessage({
+    text: "P0949 6/16 事假",
+    source: { userId: "U1" },
+  });
+
+  assert.match(reply, /P0949 陳世宏/);
+  assert.equal(sheets.rows.length, 1);
+  assert.equal(sheets.rows[0][4], "俊志班");
+  assert.equal(sheets.updatedValues[0].range, "'俊志班'!F3");
+});
+
+test("marks day shift D1 cells as leave type", async () => {
+  const { service, sheets } = makeService({ employeeSheetNames: ["婷芬班", "俊志班"] });
+  const reply = await service.handleTextMessage({
+    text: "P0068 6/16 事假",
+    source: { userId: "U1" },
+  });
+
+  assert.match(reply, /已同步排班表：2026-06-16/);
+  assert.equal(sheets.rows[0][4], "婷芬班");
+  assert.equal(sheets.updatedValues[0].range, "'婷芬班'!F3");
+  assert.deepEqual(sheets.updatedValues[0].values, [["事假"]]);
+});
+
+test("marks foreign shift AN3 and AD3 cells as leave type", async () => {
+  const { service, sheets } = makeService({ employeeSheetNames: ["婷芬班", "俊志班"] });
+  const reply = await service.handleTextMessage({
+    text: "V0001 6/16.17 事假",
+    source: { userId: "U1" },
+  });
+
+  assert.match(reply, /已同步排班表：2026-06-16、2026-06-17/);
+  assert.equal(sheets.rows[0][4], "婷芬班");
+  assert.equal(sheets.updatedValues.length, 2);
+  assert.equal(sheets.updatedValues[0].range, "'婷芬班'!F4");
+  assert.equal(sheets.updatedValues[1].range, "'婷芬班'!G4");
+});
+
+test("parses five digit employee ids", () => {
+  const { service } = makeService();
+  const request = service.parseRequest("02693 6/16 事假", new Date(2026, 4, 31));
+
+  assert.equal(request.type, "leave");
+  assert.equal(request.workerId, "02693");
 });
 
 test("marks leave type on N1 date cell with formatting", async () => {
