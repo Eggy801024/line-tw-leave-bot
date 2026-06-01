@@ -103,7 +103,8 @@ export function getConfig() {
     },
     rules: {
       workerIdPattern: new RegExp(process.env.WORKER_ID_PATTERN || "[A-Z]{1,3}\\d{3,4}", "i"),
-      defaultFullDayHours: Number(process.env.DEFAULT_FULL_DAY_HOURS || 12),
+      defaultFullDayHours: Number(process.env.DEFAULT_FULL_DAY_HOURS || 10),
+      breakHoursForFullShift: Number(process.env.BREAK_HOURS_FOR_FULL_SHIFT || 2),
       pendingSickLeaveMinutes: Number(process.env.PENDING_SICK_LEAVE_MINUTES || 30),
       adminLineUserIds: parseCsv(process.env.ADMIN_LINE_USER_IDS),
       excludedLeaveTypes: ["特休", "喪假", "婚假"],
