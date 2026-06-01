@@ -61,10 +61,14 @@ async function main() {
       send(response, 200, "OK");
 
       for (const event of payload.events || []) {
-        if (event.type !== "message") continue;
-
         try {
           let reply = null;
+          if (event.type === "follow") {
+            reply = leaveService.getWelcomeText();
+          }
+
+          if (event.type !== "message" && !reply) continue;
+
           if (event.message?.type === "text") {
             reply = await leaveService.handleTextMessage({
               text: event.message.text,
