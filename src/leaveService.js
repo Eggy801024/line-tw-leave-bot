@@ -308,17 +308,19 @@ export class LeaveService {
         continue;
       }
 
-      const currentValue = String(rows[employeeRowIndex]?.[colIndex] || "").trim().toUpperCase();
-      if (currentValue !== "N1") {
+      const currentValue = String(rows[employeeRowIndex]?.[colIndex] || "").trim();
+      if (currentValue.toUpperCase() !== "N1" && currentValue !== request.leaveType) {
         skipped.push(dateText);
         continue;
       }
 
       const colLetter = columnToLetter(colIndex);
-      await this.sheets.updateValues(
-        `${quoteSheetName(this.config.sheets.employeeSheetName)}!${colLetter}${employeeRowIndex + 1}`,
-        [[request.leaveType]],
-      );
+      if (currentValue !== request.leaveType) {
+        await this.sheets.updateValues(
+          `${quoteSheetName(this.config.sheets.employeeSheetName)}!${colLetter}${employeeRowIndex + 1}`,
+          [[request.leaveType]],
+        );
+      }
       updated.push(dateText);
       formatRanges.push({
         startRowIndex: employeeRowIndex,
