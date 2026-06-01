@@ -176,6 +176,29 @@ test("returns LINE user id", async () => {
   assert.match(reply, /Umanager/);
 });
 
+test("reports manager permission command", async () => {
+  const { service } = makeService();
+  service.config.rules.adminLineUserIds = ["Umanager"];
+
+  const reply = await service.handleTextMessage({
+    text: "主管權限",
+    source: { userId: "Umanager" },
+  });
+
+  assert.match(reply, /你已有主管查詢權限/);
+  assert.match(reply, /統計 本月/);
+});
+
+test("rejects manager permission command without admin id", async () => {
+  const { service } = makeService();
+  const reply = await service.handleTextMessage({
+    text: "主管權限",
+    source: { userId: "Uworker" },
+  });
+
+  assert.match(reply, /沒有管理查詢權限/);
+});
+
 test("finds employees when 工號 header is on the second row", async () => {
   const { service, sheets } = makeService({ sheetsOptions: { twoRowEmployeeHeader: true } });
   const reply = await service.handleTextMessage({
