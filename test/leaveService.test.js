@@ -228,6 +228,36 @@ test("marks day shift D1 cells as leave type", async () => {
   assert.deepEqual(sheets.updatedValues[0].values, [["事假"]]);
 });
 
+test("uses day shift schedule when no time is provided", async () => {
+  const { service, sheets } = makeService({ employeeSheetNames: ["婷芬班", "俊志班"] });
+  await service.handleTextMessage({
+    text: "P0068 6/16 生理假",
+    source: { userId: "U1" },
+  });
+
+  assert.equal(sheets.rows[0][6], "2026-06-16");
+  assert.equal(sheets.rows[0][7], "2026-06-16");
+  assert.equal(sheets.rows[0][8], "07:30");
+  assert.equal(sheets.rows[0][9], "19:30");
+  assert.equal(sheets.rows[0][10], 10);
+  assert.equal(sheets.updatedValues[0].range, "'婷芬班'!F3");
+});
+
+test("uses night shift schedule when no time is provided", async () => {
+  const { service, sheets } = makeService({ employeeSheetNames: ["婷芬班", "俊志班"] });
+  await service.handleTextMessage({
+    text: "P0949 6/16 生理假",
+    source: { userId: "U1" },
+  });
+
+  assert.equal(sheets.rows[0][6], "2026-06-16");
+  assert.equal(sheets.rows[0][7], "2026-06-17");
+  assert.equal(sheets.rows[0][8], "19:30");
+  assert.equal(sheets.rows[0][9], "07:30");
+  assert.equal(sheets.rows[0][10], 10);
+  assert.equal(sheets.updatedValues[0].range, "'俊志班'!F3");
+});
+
 test("marks foreign shift AN3 and AD3 cells as leave type", async () => {
   const { service, sheets } = makeService({ employeeSheetNames: ["婷芬班", "俊志班"] });
   const reply = await service.handleTextMessage({
