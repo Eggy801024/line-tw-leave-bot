@@ -101,6 +101,29 @@ export class GoogleSheetsClient {
       body: JSON.stringify(body),
     });
   }
+
+  async formatCells(sheetName, ranges, userEnteredFormat) {
+    if (ranges.length === 0) return null;
+
+    const properties = await this.getSheetProperties(sheetName);
+    if (!properties) throw new Error(`Sheet not found: ${sheetName}`);
+
+    return this.batchUpdate({
+      requests: ranges.map((range) => ({
+        repeatCell: {
+          range: {
+            sheetId: properties.sheetId,
+            startRowIndex: range.startRowIndex,
+            endRowIndex: range.endRowIndex,
+            startColumnIndex: range.startColumnIndex,
+            endColumnIndex: range.endColumnIndex,
+          },
+          cell: { userEnteredFormat },
+          fields: "userEnteredFormat(backgroundColor,textFormat)",
+        },
+      })),
+    });
+  }
 }
 
 export const LEAVE_RECORD_HEADERS = [
