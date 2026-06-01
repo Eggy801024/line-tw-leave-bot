@@ -483,6 +483,18 @@ export class LeaveService {
         : "這則訊息沒有帶到 LINE userId。";
     }
 
+    if (trimmed === "主管權限") {
+      if (!(await this.isAdmin(source.userId))) return "你目前沒有管理查詢權限。";
+      return [
+        "你已有主管查詢權限。",
+        "可用指令：",
+        "統計 本月",
+        "統計 P0216",
+        "查詢 6/3",
+        "檢查工號 P0949",
+      ].join("\n");
+    }
+
     if (trimmed === "說明" || trimmed === "help") return this.helpText();
     if (trimmed.startsWith("檢查工號")) {
       const workerMatch = trimmed.match(this.config.rules.workerIdPattern);
