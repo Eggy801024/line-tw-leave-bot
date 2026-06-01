@@ -39,9 +39,9 @@ class FakeSheets {
     if (this.twoRowEmployeeHeader) {
       return [
         ["", "", "", "B班", "B班", "A班"],
-        ["", "工號", "姓名", "6/1", "6/2", "6/3", "6/16"],
+        ["", "工號", "姓名", "6/1", "6/2", "6/3", "6/16", "6/17"],
         ["組長", "P0949", "陳世宏", "例", "", "N1", "N1"],
-        ["", "P0216", "潘鳳翎", "例", "", "N1", "休"],
+        ["", "P0216", "潘鳳翎", "例", "", "N1", "休", "事假"],
         ["", "P0218", "鍾家豪", "例", "", "N1", "N1"],
       ];
     }
@@ -209,6 +209,20 @@ test("does not overwrite date cell when original value is not N1", async () => {
   assert.match(reply, /未更新日期：2026-06-16/);
   assert.equal(sheets.updatedValues.length, 0);
   assert.equal(sheets.formattedRanges.length, 0);
+});
+
+test("formats existing matching leave type cell", async () => {
+  const { service, sheets } = makeService({ sheetsOptions: { twoRowEmployeeHeader: true } });
+  const reply = await service.handleTextMessage({
+    text: "P0216 6/17 事假",
+    source: { userId: "U1" },
+  });
+
+  assert.match(reply, /已同步排班表：2026-06-17/);
+  assert.equal(sheets.updatedValues.length, 0);
+  assert.equal(sheets.formattedRanges.length, 1);
+  assert.equal(sheets.formattedRanges[0].ranges[0].startRowIndex, 3);
+  assert.equal(sheets.formattedRanges[0].ranges[0].startColumnIndex, 7);
 });
 
 test("records multiple employees from one LINE sender", async () => {
