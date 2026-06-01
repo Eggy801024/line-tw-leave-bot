@@ -15,6 +15,13 @@ function formatDate(date) {
   return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
 }
 
+function addDays(dateText, days) {
+  const date = new Date(`${dateText}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return dateText;
+  date.setDate(date.getDate() + days);
+  return formatDate(date);
+}
+
 function formatSheetDate(dateText) {
   const date = new Date(`${dateText}T00:00:00`);
   if (Number.isNaN(date.getTime())) return "";
@@ -95,12 +102,13 @@ function parseDateRange(text, now = new Date()) {
 
 function parseTimeRange(text, { defaultFullDayHours, breakHoursForFullShift }) {
   if (ALL_DAY_RE.test(text)) {
-    return {
-      startTime: "全天",
-      endTime: "全天",
-      hours: defaultFullDayHours,
-      raw: text.match(ALL_DAY_RE)[0],
-    };
+      return {
+        startTime: "全天",
+        endTime: "全天",
+        hours: defaultFullDayHours,
+        timeMode: "full-day",
+        raw: text.match(ALL_DAY_RE)[0],
+      };
   }
 
   const match = text.match(TIME_RE);
@@ -111,6 +119,7 @@ function parseTimeRange(text, { defaultFullDayHours, breakHoursForFullShift }) {
         startTime: "未指定",
         endTime: "未指定",
         hours: Number(hoursMatch[1]),
+        timeMode: "hours",
         raw: hoursMatch[0],
       };
     }
@@ -119,6 +128,7 @@ function parseTimeRange(text, { defaultFullDayHours, breakHoursForFullShift }) {
       startTime: "全天",
       endTime: "全天",
       hours: defaultFullDayHours,
+      timeMode: "full-day",
       raw: "",
     };
   }
@@ -140,6 +150,8 @@ function parseTimeRange(text, { defaultFullDayHours, breakHoursForFullShift }) {
     startTime: `${pad2(startHour)}:${pad2(startMinute)}`,
     endTime: `${pad2(endHour)}:${pad2(endMinute)}`,
     hours: Math.max(0, Math.round((rawHours - breakHours) * 10) / 10),
+    timeMode: "range",
+    crossesMidnight: endHour * 60 + endMinute <= startTotal,
     raw: match[0],
   };
 }
@@ -181,6 +193,14 @@ function findDateColumns(rows) {
     });
   });
   return dateColumns;
+}
+
+function isNightShift(employee) {
+  return `${employee?.shift || ""} ${employee?.team || ""}`.includes("夜");
+}
+
+function isDayShift(employee) {
+  return /日|早/.test(`${employee?.shift || ""} ${employee?.team || ""}`);
 }
 
 export class LeaveService {
@@ -305,13 +325,15 @@ export class LeaveService {
   async markLeaveOnEmployeeSheet(request, employee = null) {
     const sheetName = employee?.sheetName || this.config.sheets.employeeSheetName;
     const rows = await this.sheets.getValues(`${quoteSheetName(sheetName)}!A1:AZ500`);
+    const markStartDate = request.scheduleStartDate || request.startDate;
+    const markEndDate = request.scheduleEndDate || request.endDate;
     if (rows.length === 0) {
-      return { updated: [], skipped: datesBetween(request.startDate, request.endDate) };
+      return { updated: [], skipped: datesBetween(markStartDate, markEndDate) };
     }
 
     const headerRowIndex = findHeaderRow(rows, "工號");
     if (headerRowIndex === -1) {
-      return { updated: [], skipped: datesBetween(request.startDate, request.endDate) };
+      return { updated: [], skipped: datesBetween(markStartDate, markEndDate) };
     }
 
     const headerIndex = indexHeaders(rows[headerRowIndex]);
@@ -320,7 +342,7 @@ export class LeaveService {
       (row, index) => index > headerRowIndex && normalizeWorkerId(row[idCol]) === request.workerId,
     );
     if (employeeRowIndex === -1) {
-      return { updated: [], skipped: datesBetween(request.startDate, request.endDate) };
+      return { updated: [], skipped: datesBetween(markStartDate, markEndDate) };
     }
 
     const dateColumns = findDateColumns(rows);
@@ -329,7 +351,7 @@ export class LeaveService {
     const skipped = [];
     const formatRanges = [];
 
-    for (const dateText of datesBetween(request.startDate, request.endDate)) {
+    for (const dateText of datesBetween(markStartDate, markEndDate)) {
       const sheetDate = formatSheetDate(dateText);
       const colIndex = dateColumns.get(sheetDate);
       if (colIndex === undefined) {
@@ -371,6 +393,44 @@ export class LeaveService {
     }
 
     return { updated, skipped };
+  }
+
+  applyEmployeeSchedule(request, employee) {
+    const output = {
+      ...request,
+      scheduleStartDate: request.startDate,
+      scheduleEndDate: request.endDate,
+    };
+
+    if (request.timeMode === "hours") return output;
+
+    if (request.timeMode === "range") {
+      if (request.crossesMidnight && request.startDate === request.endDate) {
+        output.endDate = addDays(request.startDate, 1);
+      }
+      return output;
+    }
+
+    if (isNightShift(employee)) {
+      return {
+        ...output,
+        endDate: addDays(request.endDate, 1),
+        startTime: "19:30",
+        endTime: "07:30",
+        hours: this.config.rules.defaultFullDayHours,
+      };
+    }
+
+    if (isDayShift(employee)) {
+      return {
+        ...output,
+        startTime: "07:30",
+        endTime: "19:30",
+        hours: this.config.rules.defaultFullDayHours,
+      };
+    }
+
+    return output;
   }
 
   buildRecord({ request, source, employee, proofLink = "", status = "已送出", note = "" }) {
@@ -459,8 +519,10 @@ export class LeaveService {
     }
 
     const markResults = [];
+    const recordRequests = [];
     for (const employee of employees) {
-      const employeeRequest = { ...request, workerId: employee.workerId };
+      const employeeRequest = this.applyEmployeeSchedule({ ...request, workerId: employee.workerId }, employee);
+      recordRequests.push(employeeRequest);
       const record = this.buildRecord({ request: employeeRequest, source, employee });
       await this.appendLeaveRecord(record);
       markResults.push({
@@ -473,8 +535,9 @@ export class LeaveService {
     return [
       "請假申請已紀錄。",
       ...employees.map((employee) => `${employee.workerId} ${employee.name || ""}`),
-      `${request.leaveType} ${request.startDate}${request.endDate !== request.startDate ? ` 至 ${request.endDate}` : ""}`,
-      `${request.startTime}-${request.endTime}，${request.hours} 小時`,
+      ...recordRequests.map((item) =>
+        `${item.leaveType} ${item.startDate}${item.endDate !== item.startDate ? ` 至 ${item.endDate}` : ""} ${item.startTime}-${item.endTime}，${item.hours} 小時`,
+      ),
       this.formatMarkResults(markResults),
     ].join("\n");
   }
@@ -494,8 +557,10 @@ export class LeaveService {
     const proofLink = uploaded.webViewLink || uploaded.webContentLink || "";
 
     const markResults = [];
+    const recordRequests = [];
     for (const employee of pending.employees) {
-      const employeeRequest = { ...pending.request, workerId: employee.workerId };
+      const employeeRequest = this.applyEmployeeSchedule({ ...pending.request, workerId: employee.workerId }, employee);
+      recordRequests.push(employeeRequest);
       const record = this.buildRecord({
         request: employeeRequest,
         source,
@@ -514,7 +579,9 @@ export class LeaveService {
     return [
       "病假申請與診斷證明已紀錄。",
       ...pending.employees.map((employee) => `${employee.workerId} ${employee.name || ""}`),
-      `${pending.request.startDate}${pending.request.endDate !== pending.request.startDate ? ` 至 ${pending.request.endDate}` : ""}`,
+      ...recordRequests.map((item) =>
+        `${item.startDate}${item.endDate !== item.startDate ? ` 至 ${item.endDate}` : ""} ${item.startTime}-${item.endTime}`,
+      ),
       this.formatMarkResults(markResults),
     ].join("\n");
   }
