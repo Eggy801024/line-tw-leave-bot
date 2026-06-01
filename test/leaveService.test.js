@@ -91,17 +91,23 @@ class FakeSheets {
 }
 
 class FakeDrive {
-  async uploadFile() {
+  constructor() {
+    this.uploads = [];
+  }
+
+  async uploadFileToClassFolder(payload) {
+    this.uploads.push(payload);
     return { webViewLink: "https://drive.google.com/file/d/test" };
   }
 }
 
 function makeService(extra = {}) {
   const sheets = new FakeSheets(extra.sheetsOptions);
+  const drive = extra.drive ?? new FakeDrive();
   const service = new LeaveService({
     sheetsClient: sheets,
     adminSheetsClient: null,
-    driveClient: extra.drive ?? new FakeDrive(),
+    driveClient: drive,
     config: {
       timeZone: "Asia/Taipei",
       sheets: {
@@ -121,7 +127,7 @@ function makeService(extra = {}) {
       },
     },
   });
-  return { service, sheets };
+  return { service, sheets, drive };
 }
 
 test("records non-sick leave immediately", async () => {
@@ -139,7 +145,7 @@ test("records non-sick leave immediately", async () => {
 });
 
 test("waits for image proof before recording sick leave", async () => {
-  const { service, sheets } = makeService();
+  const { service, sheets, drive } = makeService();
   const reply = await service.handleTextMessage({
     text: "P0216 病假 6/3 全天 發燒",
     source: { userId: "U1" },
@@ -157,6 +163,21 @@ test("waits for image proof before recording sick leave", async () => {
   assert.equal(sheets.rows.length, 1);
   assert.equal(sheets.rows[0][5], "病假");
   assert.equal(sheets.rows[0][12], "https://drive.google.com/file/d/test");
+  assert.equal(drive.uploads[0].className, "請假");
+});
+
+test("uploads sick leave proof to employee class folder", async () => {
+  const { service, drive } = makeService({ employeeSheetNames: ["婷芬班", "俊志班"] });
+  await service.handleTextMessage({
+    text: "P0949 病假 6/16 發燒",
+    source: { userId: "U1" },
+  });
+  await service.handleImageMessage({
+    source: { userId: "U1" },
+    content: { mimeType: "image/jpeg", buffer: Buffer.from("fake") },
+  });
+
+  assert.equal(drive.uploads[0].className, "俊志班");
 });
 
 test("rejects leave types handled by other workflows", () => {
