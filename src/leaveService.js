@@ -566,7 +566,9 @@ export class LeaveService {
 
     const ext = content.mimeType.includes("png") ? "png" : "jpg";
     const fileName = `診斷證明_${pending.request.workerIds.join("_")}_${pending.request.startDate}.${ext}`;
-    const uploaded = await this.drive.uploadFile({
+    const className = pending.employees[0]?.team || "";
+    const uploaded = await this.drive.uploadFileToClassFolder({
+      className,
       name: fileName,
       mimeType: content.mimeType,
       buffer: content.buffer,

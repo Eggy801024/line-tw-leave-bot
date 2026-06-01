@@ -15,11 +15,15 @@ export class GoogleDriveClient {
   }
 
   async uploadFile({ name, mimeType, buffer }) {
+    return this.uploadFileToFolder({ name, mimeType, buffer, folderId: this.folderId });
+  }
+
+  async uploadFileToFolder({ name, mimeType, buffer, folderId }) {
     const token = await this.auth.getAccessToken();
     const boundary = `leave-bot-${Date.now()}`;
     const metadata = {
       name,
-      ...(this.folderId ? { parents: [this.folderId] } : {}),
+      ...(folderId ? { parents: [folderId] } : {}),
     };
 
     const body = Buffer.concat([
@@ -53,6 +57,69 @@ export class GoogleDriveClient {
       return this.getFile(uploaded.id);
     }
     return uploaded;
+  }
+
+  async uploadFileToClassFolder({ className, name, mimeType, buffer }) {
+    const folderId = className ? await this.getOrCreateChildFolder(className) : this.folderId;
+    return this.uploadFileToFolder({ name, mimeType, buffer, folderId });
+  }
+
+  async getOrCreateChildFolder(folderName) {
+    if (!this.folderId) return "";
+
+    const existing = await this.findChildFolder(folderName);
+    if (existing) return existing.id;
+    return this.createChildFolder(folderName);
+  }
+
+  async findChildFolder(folderName) {
+    const token = await this.auth.getAccessToken();
+    const query = [
+      `name = '${String(folderName).replace(/'/g, "\\'")}'`,
+      "mimeType = 'application/vnd.google-apps.folder'",
+      `'${this.folderId}' in parents`,
+      "trashed = false",
+    ].join(" and ");
+    const params = new URLSearchParams({
+      q: query,
+      fields: "files(id,name)",
+      pageSize: "1",
+      supportsAllDrives: "true",
+      includeItemsFromAllDrives: "true",
+    });
+    const response = await fetch(`${DRIVE_API_ROOT}?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Google Drive folder lookup failed: ${response.status} ${await response.text()}`);
+    }
+
+    const body = await response.json();
+    return body.files?.[0] || null;
+  }
+
+  async createChildFolder(folderName) {
+    const token = await this.auth.getAccessToken();
+    const response = await fetch(`${DRIVE_API_ROOT}?fields=id,name`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        name: folderName,
+        mimeType: "application/vnd.google-apps.folder",
+        parents: [this.folderId],
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Google Drive folder creation failed: ${response.status} ${await response.text()}`);
+    }
+
+    const folder = await response.json();
+    return folder.id;
   }
 
   async getFile(fileId) {
