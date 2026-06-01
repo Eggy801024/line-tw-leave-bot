@@ -184,6 +184,15 @@ test("returns LINE user id", async () => {
   assert.match(reply, /Umanager/);
 });
 
+test("returns welcome text", () => {
+  const { service } = makeService();
+  const reply = service.getWelcomeText();
+
+  assert.match(reply, /歡迎使用元晶太陽能請假系統/);
+  assert.match(reply, /P1234 6\/15 事假 私事代辦/);
+  assert.match(reply, /若請病假請於30分鐘內附上診斷證明/);
+});
+
 test("reports manager permission command", async () => {
   const { service } = makeService();
   service.config.rules.adminLineUserIds = ["Umanager"];
