@@ -13,7 +13,10 @@ OP 可直接在 LINE 向機器人請假，系統會同步寫入 Google Sheets。
 需要分頁：
 
 ```text
-請假
+婷芬班
+俊志班
+美香班
+翊展班
 請假申請紀錄
 ```
 
@@ -37,12 +40,13 @@ LINE使用者ID
 備註
 ```
 
-`請假` 人員分頁建議欄位：
+四個班級人員分頁建議欄位：
 
 ```text
 工號
 姓名
-部門/班別
+班別
+班別代號
 ```
 
 ## OP 使用方式
@@ -120,10 +124,11 @@ ADMIN_SHEET_NAME=主管權限
 ADMIN_LINE_USER_IDS=
 TIME_ZONE=Asia/Taipei
 LEAVE_RECORD_SHEET_NAME=請假申請紀錄
-EMPLOYEE_SHEET_NAME=請假
-WORKER_ID_PATTERN=[A-Z]{1,3}\d{3,4}
+EMPLOYEE_SHEET_NAMES=婷芬班,俊志班,美香班,翊展班
+WORKER_ID_PATTERN=(?:[A-Z]{1,3}\d{3,4}|\d{5})
 DEFAULT_FULL_DAY_HOURS=10
 BREAK_HOURS_FOR_FULL_SHIFT=2
+ELIGIBLE_SHIFT_MARKS=N1,D1,AN3,AD3
 PENDING_SICK_LEAVE_MINUTES=30
 ```
 
