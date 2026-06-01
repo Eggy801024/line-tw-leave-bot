@@ -1,9 +1,10 @@
-import { quoteSheetName } from "./a1.js";
+import { quoteSheetName, columnToLetter } from "./a1.js";
 import { LEAVE_RECORD_HEADERS } from "./googleSheets.js";
 
 const DATE_RE = /(?:(\d{4})[/-])?(\d{1,2})[/-](\d{1,2})(?:\s*[-~到至]\s*(?:(\d{4})[/-])?(\d{1,2})[/-](\d{1,2}))?/;
 const SHORT_RANGE_RE = /(?:(\d{4})[/-])?(\d{1,2})[/-](\d{1,2})\.(\d{1,2})/;
 const TIME_RE = /(\d{1,2})(?::(\d{2}))?\s*[-~到至]\s*(\d{1,2})(?::(\d{2}))?/;
+const HOURS_RE = /(\d+(?:\.\d+)?)\s*(?:小時|H|h)/;
 const ALL_DAY_RE = /全天|整天/;
 
 function pad2(value) {
@@ -12,6 +13,24 @@ function pad2(value) {
 
 function formatDate(date) {
   return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
+
+function formatSheetDate(dateText) {
+  const date = new Date(`${dateText}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return "";
+  return `${date.getMonth() + 1}/${date.getDate()}`;
+}
+
+function datesBetween(startDate, endDate) {
+  const output = [];
+  const current = new Date(`${startDate}T00:00:00`);
+  const end = new Date(`${endDate}T00:00:00`);
+
+  while (!Number.isNaN(current.getTime()) && current <= end) {
+    output.push(formatDate(current));
+    current.setDate(current.getDate() + 1);
+  }
+  return output;
 }
 
 function nowText(timeZone) {
@@ -74,7 +93,7 @@ function parseDateRange(text, now = new Date()) {
   };
 }
 
-function parseTimeRange(text, defaultFullDayHours) {
+function parseTimeRange(text, { defaultFullDayHours, breakHoursForFullShift }) {
   if (ALL_DAY_RE.test(text)) {
     return {
       startTime: "全天",
@@ -86,6 +105,16 @@ function parseTimeRange(text, defaultFullDayHours) {
 
   const match = text.match(TIME_RE);
   if (!match) {
+    const hoursMatch = text.match(HOURS_RE);
+    if (hoursMatch) {
+      return {
+        startTime: "未指定",
+        endTime: "未指定",
+        hours: Number(hoursMatch[1]),
+        raw: hoursMatch[0],
+      };
+    }
+
     return {
       startTime: "全天",
       endTime: "全天",
@@ -101,17 +130,26 @@ function parseTimeRange(text, defaultFullDayHours) {
   const startTotal = startHour * 60 + startMinute;
   let endTotal = endHour * 60 + endMinute;
   if (endTotal <= startTotal) endTotal += 24 * 60;
+  const rawHours = (endTotal - startTotal) / 60;
+  const breakHours =
+    rawHours >= defaultFullDayHours + breakHoursForFullShift
+      ? breakHoursForFullShift
+      : 0;
 
   return {
     startTime: `${pad2(startHour)}:${pad2(startMinute)}`,
     endTime: `${pad2(endHour)}:${pad2(endMinute)}`,
-    hours: Math.round(((endTotal - startTotal) / 60) * 10) / 10,
+    hours: Math.max(0, Math.round((rawHours - breakHours) * 10) / 10),
     raw: match[0],
   };
 }
 
 function normalizeWorkerId(workerId) {
   return String(workerId || "").trim().toUpperCase();
+}
+
+function uniqueWorkerIds(workerIds) {
+  return [...new Set(workerIds.map(normalizeWorkerId).filter(Boolean))];
 }
 
 function cleanReason(text, parts) {
@@ -130,6 +168,10 @@ function indexHeaders(headers) {
   return output;
 }
 
+function findHeaderRow(rows, requiredHeader) {
+  return rows.findIndex((row) => row.some((cell) => String(cell || "").trim() === requiredHeader));
+}
+
 export class LeaveService {
   constructor({ sheetsClient, adminSheetsClient, driveClient, config }) {
     this.sheets = sheetsClient;
@@ -144,10 +186,13 @@ export class LeaveService {
   }
 
   parseRequest(text, now = new Date()) {
-    const workerMatch = text.match(this.config.rules.workerIdPattern);
-    if (!workerMatch) return { type: "invalid", reason: "請輸入工號，例如：P0216 病假 6/3 08:00-20:00 發燒" };
+    const workerMatches = [...text.matchAll(new RegExp(this.config.rules.workerIdPattern.source, "gi"))];
+    if (workerMatches.length === 0) {
+      return { type: "invalid", reason: "請輸入工號，例如：P0216 病假 6/3 08:00-20:00 發燒" };
+    }
 
-    const workerId = normalizeWorkerId(workerMatch[0]);
+    const workerIds = uniqueWorkerIds(workerMatches.map((match) => match[0]));
+    const workerId = workerIds[0];
     const dateRange = parseDateRange(text, now);
     if (!dateRange) return { type: "invalid", reason: "請輸入請假日期，例如：6/3 或 6/3-6/4" };
 
@@ -169,12 +214,16 @@ export class LeaveService {
       return { type: "invalid", reason: `${leaveType} 不在此請假系統申請，請使用原本流程。` };
     }
 
-    const timeRange = parseTimeRange(text, this.config.rules.defaultFullDayHours);
-    const reason = cleanReason(text, [workerId, leaveType, dateRange.raw, timeRange.raw]);
+    const timeRange = parseTimeRange(text, {
+      defaultFullDayHours: this.config.rules.defaultFullDayHours,
+      breakHoursForFullShift: this.config.rules.breakHoursForFullShift || 0,
+    });
+    const reason = cleanReason(text, [...workerIds, leaveType, dateRange.raw, timeRange.raw]);
 
     return {
       type: "leave",
       workerId,
+      workerIds,
       leaveType,
       ...dateRange,
       ...timeRange,
@@ -186,28 +235,117 @@ export class LeaveService {
     const rows = await this.sheets.getValues(`${quoteSheetName(this.config.sheets.employeeSheetName)}!A1:Z500`);
     if (rows.length === 0) return null;
 
-    const headerIndex = indexHeaders(rows[0]);
+    const headerRowIndex = findHeaderRow(rows, "工號");
+    if (headerRowIndex === -1) return null;
+
+    const headerIndex = indexHeaders(rows[headerRowIndex]);
     const idCol = headerIndex["工號"] ?? headerIndex["員工編號"] ?? 0;
     const nameCol = headerIndex["姓名"] ?? 1;
-    const teamCol = headerIndex["部門/班別"] ?? headerIndex["班別"] ?? headerIndex["部門"] ?? 2;
+    const teamCol = headerIndex["部門/班別"] ?? headerIndex["班別"] ?? headerIndex["部門"];
+    const roleCol = 0;
 
-    for (const row of rows.slice(1)) {
+    for (const row of rows.slice(headerRowIndex + 1)) {
       if (normalizeWorkerId(row[idCol]) === workerId) {
         return {
           workerId,
           name: row[nameCol] || "",
-          team: row[teamCol] || "",
+          team: teamCol === undefined ? row[roleCol] || "" : row[teamCol] || "",
         };
       }
     }
     return null;
   }
 
+  async debugFindEmployee(workerId) {
+    const rows = await this.sheets.getValues(`${quoteSheetName(this.config.sheets.employeeSheetName)}!A1:Z20`);
+    const headerRowIndex = findHeaderRow(rows, "工號");
+    const employee = await this.findEmployee(workerId);
+
+    return [
+      `人員分頁：${this.config.sheets.employeeSheetName}`,
+      `讀取列數：${rows.length}`,
+      `工號標題列：${headerRowIndex === -1 ? "找不到" : headerRowIndex + 1}`,
+      `查詢工號：${workerId}`,
+      employee ? `結果：${employee.workerId} ${employee.name || ""} ${employee.team || ""}` : "結果：找不到",
+    ].join("\n");
+  }
+
+  async markLeaveOnEmployeeSheet(request) {
+    const rows = await this.sheets.getValues(`${quoteSheetName(this.config.sheets.employeeSheetName)}!A1:AZ500`);
+    if (rows.length === 0) {
+      return { updated: [], skipped: datesBetween(request.startDate, request.endDate) };
+    }
+
+    const headerRowIndex = findHeaderRow(rows, "工號");
+    if (headerRowIndex === -1) {
+      return { updated: [], skipped: datesBetween(request.startDate, request.endDate) };
+    }
+
+    const headerIndex = indexHeaders(rows[headerRowIndex]);
+    const idCol = headerIndex["工號"] ?? headerIndex["員工編號"] ?? 0;
+    const employeeRowIndex = rows.findIndex(
+      (row, index) => index > headerRowIndex && normalizeWorkerId(row[idCol]) === request.workerId,
+    );
+    if (employeeRowIndex === -1) {
+      return { updated: [], skipped: datesBetween(request.startDate, request.endDate) };
+    }
+
+    const dateColumns = new Map();
+    rows[headerRowIndex].forEach((cell, index) => {
+      const label = String(cell || "").trim();
+      if (label) dateColumns.set(label, index);
+    });
+
+    const updated = [];
+    const skipped = [];
+    const formatRanges = [];
+
+    for (const dateText of datesBetween(request.startDate, request.endDate)) {
+      const sheetDate = formatSheetDate(dateText);
+      const colIndex = dateColumns.get(sheetDate);
+      if (colIndex === undefined) {
+        skipped.push(dateText);
+        continue;
+      }
+
+      const currentValue = String(rows[employeeRowIndex]?.[colIndex] || "").trim().toUpperCase();
+      if (currentValue !== "N1") {
+        skipped.push(dateText);
+        continue;
+      }
+
+      const colLetter = columnToLetter(colIndex);
+      await this.sheets.updateValues(
+        `${quoteSheetName(this.config.sheets.employeeSheetName)}!${colLetter}${employeeRowIndex + 1}`,
+        [[request.leaveType]],
+      );
+      updated.push(dateText);
+      formatRanges.push({
+        startRowIndex: employeeRowIndex,
+        endRowIndex: employeeRowIndex + 1,
+        startColumnIndex: colIndex,
+        endColumnIndex: colIndex + 1,
+      });
+    }
+
+    if (formatRanges.length > 0 && typeof this.sheets.formatCells === "function") {
+      await this.sheets.formatCells(this.config.sheets.employeeSheetName, formatRanges, {
+        backgroundColor: { red: 1, green: 0.92, blue: 0.2 },
+        textFormat: {
+          foregroundColor: { red: 0.85, green: 0, blue: 0 },
+          bold: true,
+        },
+      });
+    }
+
+    return { updated, skipped };
+  }
+
   buildRecord({ request, source, employee, proofLink = "", status = "已送出", note = "" }) {
     return [
       nowText(this.config.timeZone),
       source.userId || "",
-      request.workerId,
+      employee?.workerId || request.workerId,
       employee?.name || "",
       employee?.team || "",
       request.leaveType,
@@ -254,6 +392,11 @@ export class LeaveService {
     }
 
     if (trimmed === "說明" || trimmed === "help") return this.helpText();
+    if (trimmed.startsWith("檢查工號")) {
+      const workerMatch = trimmed.match(this.config.rules.workerIdPattern);
+      if (!workerMatch) return "請輸入：檢查工號 P0949";
+      return this.debugFindEmployee(normalizeWorkerId(workerMatch[0]));
+    }
     if (trimmed.startsWith("統計") || trimmed.startsWith("查詢")) {
       return this.handleAdminCommand({ text: trimmed, source });
     }
@@ -261,24 +404,46 @@ export class LeaveService {
     const request = this.parseRequest(trimmed);
     if (request.type === "invalid") return request.reason;
 
-    const employee = await this.findEmployee(request.workerId);
-    if (!employee) return `找不到工號 ${request.workerId}，請確認人員名單是否有這位同仁。`;
+    const employeeResults = await Promise.all(
+      request.workerIds.map(async (workerId) => ({
+        workerId,
+        employee: await this.findEmployee(workerId),
+      })),
+    );
+    const missingWorkerIds = employeeResults
+      .filter((item) => !item.employee)
+      .map((item) => item.workerId);
+    if (missingWorkerIds.length > 0) {
+      return `找不到工號 ${missingWorkerIds.join("、")}，請確認人員名單是否有這位同仁。`;
+    }
+    const employees = employeeResults.map((item) => item.employee);
 
     if (request.leaveType === "病假") {
-      this.setPending(source.userId, { request, employee });
+      this.setPending(source.userId, { request, employees });
       return [
-        `已收到 ${employee.name || request.workerId} 的病假申請。`,
+        `已收到 ${employees.map((employee) => employee.name || employee.workerId).join("、")} 的病假申請。`,
         "請在 30 分鐘內直接上傳診斷證明圖片，我收到圖片後才會寫入請假紀錄。",
       ].join("\n");
     }
 
-    const record = this.buildRecord({ request, source, employee });
-    await this.appendLeaveRecord(record);
+    const markResults = [];
+    for (const employee of employees) {
+      const employeeRequest = { ...request, workerId: employee.workerId };
+      const record = this.buildRecord({ request: employeeRequest, source, employee });
+      await this.appendLeaveRecord(record);
+      markResults.push({
+        workerId: employee.workerId,
+        name: employee.name,
+        result: await this.markLeaveOnEmployeeSheet(employeeRequest),
+      });
+    }
+
     return [
       "請假申請已紀錄。",
-      `${request.workerId} ${employee.name || ""}`,
+      ...employees.map((employee) => `${employee.workerId} ${employee.name || ""}`),
       `${request.leaveType} ${request.startDate}${request.endDate !== request.startDate ? ` 至 ${request.endDate}` : ""}`,
       `${request.startTime}-${request.endTime}，${request.hours} 小時`,
+      this.formatMarkResults(markResults),
     ].join("\n");
   }
 
@@ -288,7 +453,7 @@ export class LeaveService {
     if (!this.drive) return "系統尚未設定 Google Drive 資料夾，暫時無法上傳診斷證明。";
 
     const ext = content.mimeType.includes("png") ? "png" : "jpg";
-    const fileName = `診斷證明_${pending.request.workerId}_${pending.request.startDate}.${ext}`;
+    const fileName = `診斷證明_${pending.request.workerIds.join("_")}_${pending.request.startDate}.${ext}`;
     const uploaded = await this.drive.uploadFile({
       name: fileName,
       mimeType: content.mimeType,
@@ -296,20 +461,52 @@ export class LeaveService {
     });
     const proofLink = uploaded.webViewLink || uploaded.webContentLink || "";
 
-    const record = this.buildRecord({
-      request: pending.request,
-      source,
-      employee: pending.employee,
-      proofLink,
-    });
-    await this.appendLeaveRecord(record);
+    const markResults = [];
+    for (const employee of pending.employees) {
+      const employeeRequest = { ...pending.request, workerId: employee.workerId };
+      const record = this.buildRecord({
+        request: employeeRequest,
+        source,
+        employee,
+        proofLink,
+      });
+      await this.appendLeaveRecord(record);
+      markResults.push({
+        workerId: employee.workerId,
+        name: employee.name,
+        result: await this.markLeaveOnEmployeeSheet(employeeRequest),
+      });
+    }
     this.pendingSickLeaves.delete(source.userId);
 
     return [
       "病假申請與診斷證明已紀錄。",
-      `${pending.request.workerId} ${pending.employee.name || ""}`,
+      ...pending.employees.map((employee) => `${employee.workerId} ${employee.name || ""}`),
       `${pending.request.startDate}${pending.request.endDate !== pending.request.startDate ? ` 至 ${pending.request.endDate}` : ""}`,
+      this.formatMarkResults(markResults),
     ].join("\n");
+  }
+
+  formatMarkResults(markResults) {
+    return markResults
+      .map(({ workerId, name, result }) => {
+        const text = this.formatMarkResult(result);
+        return text ? `${workerId} ${name || ""}\n${text}` : "";
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  formatMarkResult(markResult) {
+    if (!markResult) return "";
+    const lines = [];
+    if (markResult.updated.length > 0) {
+      lines.push(`已同步排班表：${markResult.updated.join("、")}`);
+    }
+    if (markResult.skipped.length > 0) {
+      lines.push(`未更新日期：${markResult.skipped.join("、")}（找不到日期或原格不是 N1）`);
+    }
+    return lines.join("\n");
   }
 
   async isAdmin(userId) {
