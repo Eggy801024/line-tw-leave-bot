@@ -53,6 +53,14 @@ class FakeSheets {
       ];
     }
 
+    if (range.includes("'翊展班'")) {
+      return [
+        ["", "工號", "姓名", "班別", "班別\n代號", "B班", "B班"],
+        ["", "", "", "", "", "6/14", "6/16"],
+        ["", "P0805", "測試夜班", "夜B班", "B1", "N1", "N1"],
+      ];
+    }
+
     if (this.twoRowEmployeeHeader) {
       return [
         ["", "", "", "B班", "B班", "A班"],
@@ -258,10 +266,10 @@ test("uses day shift schedule when no time is provided", async () => {
     source: { userId: "U1" },
   });
 
-  assert.equal(sheets.rows[0][6], "2026-06-16");
-  assert.equal(sheets.rows[0][7], "2026-06-16");
-  assert.equal(sheets.rows[0][8], "07:30");
-  assert.equal(sheets.rows[0][9], "19:30");
+  assert.equal(sheets.rows[0][6], "'2026-06-16");
+  assert.equal(sheets.rows[0][7], "'2026-06-16");
+  assert.equal(sheets.rows[0][8], "'07:30");
+  assert.equal(sheets.rows[0][9], "'19:30");
   assert.equal(sheets.rows[0][10], 10);
   assert.equal(sheets.updatedValues[0].range, "'婷芬班'!F3");
 });
@@ -273,12 +281,27 @@ test("uses night shift schedule when no time is provided", async () => {
     source: { userId: "U1" },
   });
 
-  assert.equal(sheets.rows[0][6], "2026-06-16");
-  assert.equal(sheets.rows[0][7], "2026-06-17");
-  assert.equal(sheets.rows[0][8], "19:30");
-  assert.equal(sheets.rows[0][9], "07:30");
+  assert.equal(sheets.rows[0][6], "'2026-06-16");
+  assert.equal(sheets.rows[0][7], "'2026-06-17");
+  assert.equal(sheets.rows[0][8], "'19:30");
+  assert.equal(sheets.rows[0][9], "'07:30");
   assert.equal(sheets.rows[0][10], 10);
   assert.equal(sheets.updatedValues[0].range, "'俊志班'!F3");
+});
+
+test("does not parse hyphen date as time range", async () => {
+  const { service, sheets } = makeService({ employeeSheetNames: ["翊展班"] });
+  await service.handleTextMessage({
+    text: "P0805 6-14 事假 家裡有事",
+    source: { userId: "U1" },
+  });
+
+  assert.equal(sheets.rows[0][6], "'2026-06-14");
+  assert.equal(sheets.rows[0][7], "'2026-06-15");
+  assert.equal(sheets.rows[0][8], "'19:30");
+  assert.equal(sheets.rows[0][9], "'07:30");
+  assert.equal(sheets.rows[0][10], 10);
+  assert.equal(sheets.updatedValues[0].range, "'翊展班'!F3");
 });
 
 test("marks foreign shift AN3 and AD3 cells as leave type", async () => {
