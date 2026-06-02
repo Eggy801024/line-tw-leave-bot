@@ -101,13 +101,26 @@ class FakeDrive {
   }
 }
 
+class FakeDatabase {
+  constructor() {
+    this.leaveRequests = [];
+  }
+
+  async insertLeaveRequest(payload) {
+    this.leaveRequests.push(payload);
+    return `leave-${this.leaveRequests.length}`;
+  }
+}
+
 function makeService(extra = {}) {
   const sheets = new FakeSheets(extra.sheetsOptions);
   const drive = extra.drive ?? new FakeDrive();
+  const database = extra.database ?? null;
   const service = new LeaveService({
     sheetsClient: sheets,
     adminSheetsClient: null,
     driveClient: drive,
+    databaseClient: database,
     config: {
       timeZone: "Asia/Taipei",
       sheets: {
@@ -127,7 +140,7 @@ function makeService(extra = {}) {
       },
     },
   });
-  return { service, sheets, drive };
+  return { service, sheets, drive, database };
 }
 
 test("records non-sick leave immediately", async () => {
@@ -142,6 +155,21 @@ test("records non-sick leave immediately", async () => {
   assert.equal(sheets.rows[0][2], "P0216");
   assert.equal(sheets.rows[0][5], "事假");
   assert.equal(sheets.rows[0][10], 10);
+});
+
+test("writes non-sick leave to database when configured", async () => {
+  const database = new FakeDatabase();
+  const { service } = makeService({ database });
+
+  await service.handleTextMessage({
+    text: "P0216 事假 6/3 08:00-20:00 家中有事",
+    source: { userId: "U1" },
+  });
+
+  assert.equal(database.leaveRequests.length, 1);
+  assert.equal(database.leaveRequests[0].employee.workerId, "P0216");
+  assert.equal(database.leaveRequests[0].request.leaveType, "事假");
+  assert.equal(database.leaveRequests[0].source.userId, "U1");
 });
 
 test("waits for image proof before recording sick leave", async () => {
@@ -178,6 +206,24 @@ test("uploads sick leave proof to employee class folder", async () => {
   });
 
   assert.equal(drive.uploads[0].className, "俊志班");
+});
+
+test("writes sick leave proof link to database after image upload", async () => {
+  const database = new FakeDatabase();
+  const { service } = makeService({ database, employeeSheetNames: ["婷芬班", "俊志班"] });
+
+  await service.handleTextMessage({
+    text: "P0949 病假 6/16 發燒",
+    source: { userId: "U1" },
+  });
+  await service.handleImageMessage({
+    source: { userId: "U1" },
+    content: { mimeType: "image/jpeg", buffer: Buffer.from("fake") },
+  });
+
+  assert.equal(database.leaveRequests.length, 1);
+  assert.equal(database.leaveRequests[0].employee.workerId, "P0949");
+  assert.equal(database.leaveRequests[0].proofLink, "https://drive.google.com/file/d/test");
 });
 
 test("rejects leave types handled by other workflows", () => {
