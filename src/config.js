@@ -99,6 +99,9 @@ export function getConfig() {
       webAppUrl: process.env.DRIVE_UPLOAD_WEB_APP_URL || "",
       secret: process.env.DRIVE_UPLOAD_SECRET || "",
     },
+    database: {
+      url: process.env.DATABASE_URL || "",
+    },
     sheets: {
       leaveRecordSheetName: process.env.LEAVE_RECORD_SHEET_NAME || "請假申請紀錄",
       employeeSheetName: process.env.EMPLOYEE_SHEET_NAME || "請假",

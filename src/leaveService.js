@@ -208,10 +208,11 @@ function isDayShift(employee) {
 }
 
 export class LeaveService {
-  constructor({ sheetsClient, adminSheetsClient, driveClient, config }) {
+  constructor({ sheetsClient, adminSheetsClient, driveClient, databaseClient, config }) {
     this.sheets = sheetsClient;
     this.adminSheets = adminSheetsClient;
     this.drive = driveClient;
+    this.database = databaseClient;
     this.config = config;
     this.pendingSickLeaves = new Map();
   }
@@ -463,6 +464,23 @@ export class LeaveService {
     await this.sheets.appendValues(`${quoteSheetName(this.config.sheets.leaveRecordSheetName)}!A:O`, [record]);
   }
 
+  async insertLeaveRequestToDatabase({ request, source, employee, proofLink = "", rawMessage = "" }) {
+    if (!this.database) return null;
+
+    try {
+      return await this.database.insertLeaveRequest({
+        request,
+        source,
+        employee,
+        proofLink,
+        rawMessage,
+      });
+    } catch (error) {
+      console.error("Database leave insert failed:", error);
+      return null;
+    }
+  }
+
   setPending(sourceUserId, payload) {
     const expiresAt = Date.now() + this.config.rules.pendingSickLeaveMinutes * 60 * 1000;
     this.pendingSickLeaves.set(sourceUserId, { ...payload, expiresAt });
@@ -528,7 +546,7 @@ export class LeaveService {
     const employees = employeeResults.map((item) => item.employee);
 
     if (request.leaveType === "病假") {
-      this.setPending(source.userId, { request, employees });
+      this.setPending(source.userId, { request: { ...request, rawMessage: trimmed }, employees });
       return [
         `已收到 ${employees.map((employee) => employee.name || employee.workerId).join("、")} 的病假申請。`,
         "請在 30 分鐘內直接上傳診斷證明圖片，我收到圖片後才會寫入請假紀錄。",
@@ -542,6 +560,12 @@ export class LeaveService {
       recordRequests.push(employeeRequest);
       const record = this.buildRecord({ request: employeeRequest, source, employee });
       await this.appendLeaveRecord(record);
+      await this.insertLeaveRequestToDatabase({
+        request: employeeRequest,
+        source,
+        employee,
+        rawMessage: trimmed,
+      });
       markResults.push({
         workerId: employee.workerId,
         name: employee.name,
@@ -587,6 +611,13 @@ export class LeaveService {
         proofLink,
       });
       await this.appendLeaveRecord(record);
+      await this.insertLeaveRequestToDatabase({
+        request: employeeRequest,
+        source,
+        employee,
+        proofLink,
+        rawMessage: pending.request.rawMessage || "",
+      });
       markResults.push({
         workerId: employee.workerId,
         name: employee.name,

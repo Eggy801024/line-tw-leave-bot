@@ -1,6 +1,7 @@
 import http from "node:http";
 import { AppsScriptDriveClient } from "./appsScriptDrive.js";
 import { getConfig } from "./config.js";
+import { LeaveDatabaseClient } from "./database.js";
 import { GoogleDriveClient } from "./googleDrive.js";
 import { GoogleSheetsClient } from "./googleSheets.js";
 import { LeaveService } from "./leaveService.js";
@@ -39,7 +40,16 @@ async function main() {
         folderId: config.google.driveFolderId,
       })
     : null;
-  const leaveService = new LeaveService({ sheetsClient: sheets, adminSheetsClient: adminSheets, driveClient: drive, config });
+  const database = config.database.url
+    ? new LeaveDatabaseClient({ databaseUrl: config.database.url })
+    : null;
+  const leaveService = new LeaveService({
+    sheetsClient: sheets,
+    adminSheetsClient: adminSheets,
+    driveClient: drive,
+    databaseClient: database,
+    config,
+  });
 
   const server = http.createServer(async (request, response) => {
     try {
