@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>元晶請假主管後台</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <h1>元晶請假主管後台</h1>
+          <p>查詢 OP 請假紀錄、班級統計與病假證明</p>
+        </div>
+        <button id="logoutButton" class="icon-button" title="登出" hidden>登出</button>
+      </header>
+
+      <section id="loginPanel" class="login-panel">
+        <label>
+          後台密碼
+          <input id="passwordInput" type="password" autocomplete="current-password" />
+        </label>
+        <button id="loginButton">登入</button>
+      </section>
+
+      <section id="dashboard" hidden>
+        <form id="filters" class="filters">
+          <label>
+            班級
+            <select name="team">
+              <option value="">全部</option>
+              <option>婷芬班</option>
+              <option>俊志班</option>
+              <option>美香班</option>
+              <option>翊展班</option>
+            </select>
+          </label>
+          <label>
+            假別
+            <select name="leaveType">
+              <option value="">全部</option>
+              <option>病假</option>
+              <option>事假</option>
+              <option>公假</option>
+              <option>生理假</option>
+              <option>家庭照顧假</option>
+              <option>產檢假</option>
+              <option>陪產假</option>
+            </select>
+          </label>
+          <label>
+            工號
+            <input name="workerId" placeholder="P0949" />
+          </label>
+          <label>
+            起日
+            <input name="from" type="date" />
+          </label>
+          <label>
+            迄日
+            <input name="to" type="date" />
+          </label>
+          <div class="filter-actions">
+            <button type="submit">查詢</button>
+            <button type="button" id="monthButton">本月</button>
+            <button type="button" id="exportButton">匯出 CSV</button>
+          </div>
+        </form>
+
+        <section class="metrics">
+          <article>
+            <span>請假筆數</span>
+            <strong id="totalCount">0</strong>
+          </article>
+          <article>
+            <span>請假時數</span>
+            <strong id="totalHours">0</strong>
+          </article>
+          <article>
+            <span>今日請假</span>
+            <strong id="todayCount">0</strong>
+          </article>
+        </section>
+
+        <section class="split">
+          <div class="panel">
+            <h2>班級統計</h2>
+            <div id="teamStats" class="stat-list"></div>
+          </div>
+          <div class="panel">
+            <h2>假別統計</h2>
+            <div id="typeStats" class="stat-list"></div>
+          </div>
+        </section>
+
+        <section class="panel table-panel">
+          <div class="panel-heading">
+            <h2>請假紀錄</h2>
+            <span id="rowCount"></span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>排班日期</th>
+                  <th>工號</th>
+                  <th>姓名</th>
+                  <th>班級</th>
+                  <th>假別</th>
+                  <th>日期時間</th>
+                  <th>時數</th>
+                  <th>原因</th>
+                  <th>證明</th>
+                </tr>
+              </thead>
+              <tbody id="leaveRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>
