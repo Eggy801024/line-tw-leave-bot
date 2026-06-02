@@ -122,4 +122,109 @@ export class LeaveDatabaseClient {
       client.release();
     }
   }
+
+  async getLeaveSummary(filters = {}) {
+    const { where, values } = buildLeaveWhere(filters);
+    const [totals, byTeam, byType, today] = await Promise.all([
+      this.pool.query(
+        `
+        SELECT
+          COUNT(*)::int AS count,
+          COALESCE(SUM(hours), 0)::float AS hours
+        FROM leave_request_view
+        ${where}
+        `,
+        values,
+      ),
+      this.pool.query(
+        `
+        SELECT team_name, COUNT(*)::int AS count, COALESCE(SUM(hours), 0)::float AS hours
+        FROM leave_request_view
+        ${where}
+        GROUP BY team_name
+        ORDER BY team_name
+        `,
+        values,
+      ),
+      this.pool.query(
+        `
+        SELECT leave_type_name, COUNT(*)::int AS count, COALESCE(SUM(hours), 0)::float AS hours
+        FROM leave_request_view
+        ${where}
+        GROUP BY leave_type_name
+        ORDER BY count DESC, leave_type_name
+        `,
+        values,
+      ),
+      this.pool.query(
+        `
+        SELECT COUNT(*)::int AS count
+        FROM leave_request_view
+        WHERE schedule_date = CURRENT_DATE
+          AND status = 'submitted'
+        `,
+      ),
+    ]);
+
+    return {
+      totalCount: totals.rows[0]?.count || 0,
+      totalHours: totals.rows[0]?.hours || 0,
+      todayCount: today.rows[0]?.count || 0,
+      byTeam: byTeam.rows,
+      byType: byType.rows,
+    };
+  }
+
+  async listLeaveRequests(filters = {}) {
+    const { where, values } = buildLeaveWhere(filters);
+    const limit = Math.min(Number(filters.limit || 200), 500);
+    const result = await this.pool.query(
+      `
+      SELECT
+        id,
+        created_at,
+        worker_id,
+        employee_name,
+        team_name,
+        shift_label,
+        leave_type_name,
+        schedule_date,
+        start_date,
+        end_date,
+        start_time,
+        end_time,
+        hours,
+        reason,
+        status,
+        medical_proof_url
+      FROM leave_request_view
+      ${where}
+      ORDER BY schedule_date DESC, created_at DESC
+      LIMIT ${limit}
+      `,
+      values,
+    );
+    return result.rows;
+  }
+}
+
+function buildLeaveWhere(filters = {}) {
+  const clauses = ["status = 'submitted'"];
+  const values = [];
+
+  function add(value, clause) {
+    values.push(value);
+    clauses.push(clause.replace("?", `$${values.length}`));
+  }
+
+  if (filters.team) add(filters.team, "team_name = ?");
+  if (filters.leaveType) add(filters.leaveType, "leave_type_name = ?");
+  if (filters.workerId) add(String(filters.workerId).toUpperCase(), "worker_id = ?");
+  if (filters.from) add(filters.from, "schedule_date >= ?::date");
+  if (filters.to) add(filters.to, "schedule_date <= ?::date");
+
+  return {
+    where: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "",
+    values,
+  };
 }

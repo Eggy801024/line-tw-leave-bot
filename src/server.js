@@ -1,4 +1,6 @@
 import http from "node:http";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { AppsScriptDriveClient } from "./appsScriptDrive.js";
 import { getConfig } from "./config.js";
 import { LeaveDatabaseClient } from "./database.js";
@@ -19,6 +21,67 @@ function readRawBody(request) {
 function send(response, statusCode, body) {
   response.writeHead(statusCode, { "Content-Type": "text/plain; charset=utf-8" });
   response.end(body);
+}
+
+function sendJson(response, statusCode, body) {
+  response.writeHead(statusCode, { "Content-Type": "application/json; charset=utf-8" });
+  response.end(JSON.stringify(body));
+}
+
+function parseUrl(request) {
+  return new URL(request.url, "http://localhost");
+}
+
+function isAuthorized(request, config, url) {
+  if (!config.web.adminPassword) return true;
+  const header = request.headers.authorization || "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : url.searchParams.get("token");
+  return token === config.web.adminPassword;
+}
+
+function csvEscape(value) {
+  const text = String(value ?? "");
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function leaveRowsToCsv(rows) {
+  const header = ["排班日期", "工號", "姓名", "班級", "班別", "假別", "開始日期", "結束日期", "開始時間", "結束時間", "請假時數", "原因", "診斷證明"];
+  const data = rows.map((row) => [
+    row.schedule_date,
+    row.worker_id,
+    row.employee_name,
+    row.team_name,
+    row.shift_label,
+    row.leave_type_name,
+    row.start_date,
+    row.end_date,
+    row.start_time,
+    row.end_time,
+    row.hours,
+    row.reason,
+    row.medical_proof_url,
+  ]);
+  return [header, ...data].map((row) => row.map(csvEscape).join(",")).join("\n");
+}
+
+async function serveStatic(response, filePath, contentType) {
+  try {
+    const body = await fs.readFile(filePath);
+    response.writeHead(200, { "Content-Type": contentType });
+    response.end(body);
+  } catch {
+    send(response, 404, "Not found");
+  }
+}
+
+function queryFilters(url) {
+  return {
+    team: url.searchParams.get("team") || "",
+    leaveType: url.searchParams.get("leaveType") || "",
+    workerId: url.searchParams.get("workerId") || "",
+    from: url.searchParams.get("from") || "",
+    to: url.searchParams.get("to") || "",
+  };
 }
 
 async function main() {
@@ -50,15 +113,63 @@ async function main() {
     databaseClient: database,
     config,
   });
+  const publicDir = path.resolve("public");
 
   const server = http.createServer(async (request, response) => {
     try {
-      if (request.method === "GET" && request.url === "/") {
+      const url = parseUrl(request);
+      if (request.method === "GET" && url.pathname === "/") {
         send(response, 200, "LINE leave request bot is running.");
         return;
       }
 
-      if (request.method !== "POST" || request.url !== "/webhook") {
+      if (request.method === "GET" && url.pathname === "/app") {
+        await serveStatic(response, path.join(publicDir, "app.html"), "text/html; charset=utf-8");
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/app.css") {
+        await serveStatic(response, path.join(publicDir, "app.css"), "text/css; charset=utf-8");
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/app.js") {
+        await serveStatic(response, path.join(publicDir, "app.js"), "application/javascript; charset=utf-8");
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname.startsWith("/api/")) {
+        if (!database) {
+          sendJson(response, 503, { error: "Database is not configured" });
+          return;
+        }
+        if (!isAuthorized(request, config, url)) {
+          sendJson(response, 401, { error: "Unauthorized" });
+          return;
+        }
+
+        if (url.pathname === "/api/summary") {
+          sendJson(response, 200, await database.getLeaveSummary(queryFilters(url)));
+          return;
+        }
+
+        if (url.pathname === "/api/leaves") {
+          sendJson(response, 200, { rows: await database.listLeaveRequests(queryFilters(url)) });
+          return;
+        }
+
+        if (url.pathname === "/api/leaves.csv") {
+          const rows = await database.listLeaveRequests({ ...queryFilters(url), limit: 500 });
+          response.writeHead(200, {
+            "Content-Type": "text/csv; charset=utf-8",
+            "Content-Disposition": "attachment; filename=leave_requests.csv",
+          });
+          response.end(`\uFEFF${leaveRowsToCsv(rows)}`);
+          return;
+        }
+      }
+
+      if (request.method !== "POST" || url.pathname !== "/webhook") {
         send(response, 404, "Not found");
         return;
       }

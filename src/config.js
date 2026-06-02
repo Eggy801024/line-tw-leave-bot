@@ -102,6 +102,9 @@ export function getConfig() {
     database: {
       url: process.env.DATABASE_URL || "",
     },
+    web: {
+      adminPassword: process.env.WEB_ADMIN_PASSWORD || "",
+    },
     sheets: {
       leaveRecordSheetName: process.env.LEAVE_RECORD_SHEET_NAME || "請假申請紀錄",
       employeeSheetName: process.env.EMPLOYEE_SHEET_NAME || "請假",

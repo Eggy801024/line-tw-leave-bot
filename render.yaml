@@ -28,6 +28,8 @@ services:
         sync: false
       - key: DATABASE_URL
         sync: false
+      - key: WEB_ADMIN_PASSWORD
+        sync: false
       - key: ADMIN_SPREADSHEET_ID
         sync: false
       - key: ADMIN_SHEET_NAME

@@ -37,7 +37,7 @@ export class GoogleDriveClient {
     ]);
 
     const response = await fetch(
-      `${DRIVE_UPLOAD_ROOT}?uploadType=multipart&fields=id,name,webViewLink,webContentLink`,
+      `${DRIVE_UPLOAD_ROOT}?uploadType=multipart&supportsAllDrives=true&fields=id,name,webViewLink,webContentLink`,
       {
         method: "POST",
         headers: {
@@ -101,7 +101,7 @@ export class GoogleDriveClient {
 
   async createChildFolder(folderName) {
     const token = await this.auth.getAccessToken();
-    const response = await fetch(`${DRIVE_API_ROOT}?fields=id,name`, {
+    const response = await fetch(`${DRIVE_API_ROOT}?supportsAllDrives=true&fields=id,name`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -125,7 +125,7 @@ export class GoogleDriveClient {
   async getFile(fileId) {
     const token = await this.auth.getAccessToken();
     const response = await fetch(
-      `${DRIVE_API_ROOT}/${encodeURIComponent(fileId)}?fields=id,name,webViewLink,webContentLink`,
+      `${DRIVE_API_ROOT}/${encodeURIComponent(fileId)}?supportsAllDrives=true&fields=id,name,webViewLink,webContentLink`,
       {
         headers: { Authorization: `Bearer ${token}` },
       },

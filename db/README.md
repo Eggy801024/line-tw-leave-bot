@@ -31,6 +31,7 @@ Run in order:
 ```text
 db/migrations/001_init.sql
 db/migrations/002_updated_at_triggers.sql
+db/migrations/003_leave_request_view.sql
 ```
 
 ## Render PostgreSQL
