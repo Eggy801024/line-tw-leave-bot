@@ -22,6 +22,12 @@ services:
         sync: false
       - key: GOOGLE_DRIVE_FOLDER_ID
         sync: false
+      - key: DRIVE_UPLOAD_WEB_APP_URL
+        sync: false
+      - key: DRIVE_UPLOAD_SECRET
+        sync: false
+      - key: DATABASE_URL
+        sync: false
       - key: ADMIN_SPREADSHEET_ID
         sync: false
       - key: ADMIN_SHEET_NAME
