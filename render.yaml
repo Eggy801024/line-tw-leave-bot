@@ -3,7 +3,7 @@ services:
     name: line-leave-request-bot
     runtime: node
     plan: free
-    buildCommand: ""
+    buildCommand: "npm install"
     startCommand: "node src/server.js"
     healthCheckPath: /
     autoDeploy: true
